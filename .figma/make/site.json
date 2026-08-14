@@ -1,0 +1,10 @@
+{
+  "description": "This football app provides fans with real-time updates, match statistics, and team news, enhancing their engagement and experience with the sport.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
