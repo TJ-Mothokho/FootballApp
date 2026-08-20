@@ -1,76 +1,114 @@
 import { useState } from "react";
-import { Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Input } from "../components/ui";
-import { seasons, standings } from "../data/mockData";
+import { Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Input, Skeleton } from "../components/ui";
 import { FormBadge, Avatar } from "../components/ui";
+import { useQuery } from "../hooks/useApi";
+import {
+  fetchSeasons,
+  fetchSeasonStatistics,
+  fetchSeasonMatches,
+  n, f,
+  type SeasonView,
+  type MatchView,
+} from "../services/api";
 
-export default function Seasons({ onNavigate }: { onNavigate: (page: string, id?: string) => void }) {
-  const [selected, setSelected] = useState<string | null>(null);
+function SeasonDetail({ season, onBack }: { season: SeasonView; onBack: () => void }) {
   const [tab, setTab] = useState("Overview");
-  const [search, setSearch] = useState("");
+  const stats = useQuery(() => fetchSeasonStatistics(season.id), [season.id]);
+  const seasonMatches = useQuery(() => fetchSeasonMatches(season.id), [season.id]);
 
-  if (selected) {
-    const season = seasons.find(s => s.id === selected)!;
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title={season.name}
-          subtitle={season.competition}
-          breadcrumb={["Seasons", season.name]}
-          actions={
-            <>
-              <Button variant="secondary" onClick={() => setSelected(null)}>← Back</Button>
-              <Button variant="primary">Edit</Button>
-            </>
-          }
-        />
-        <div className="flex items-center gap-2">
-          <Badge variant={season.isCurrent ? "success" : "muted"}>{season.status}</Badge>
-          <span className="text-sm text-muted-foreground">{season.startDate} → {season.endDate}</span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <StatCard label="Matches" value={season.matches} />
-          <StatCard label="Teams" value={season.teams} />
-          <StatCard label="Players" value="382" />
-          <StatCard label="Goals" value="131" />
-          <StatCard label="Avg Goals" value="1.49" />
-        </div>
-        <Tabs tabs={["Overview", "Fixtures", "Results", "Standings", "Statistics"]} active={tab} onChange={setTab} />
-        {tab === "Standings" && (
-          <Card className="overflow-hidden">
+  const s = stats.data;
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={season.name}
+        subtitle={season.competition || "Season"}
+        breadcrumb={["Seasons", season.name]}
+        actions={
+          <>
+            <Button variant="secondary" onClick={onBack}>← Back</Button>
+          </>
+        }
+      />
+      <div className="flex items-center gap-2">
+        <Badge variant={season.isCurrent ? "success" : "muted"}>{season.status}</Badge>
+        {season.startDate && <span className="text-sm text-muted-foreground font-mono">{season.startDate} → {season.endDate}</span>}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {stats.loading ? (
+          Array.from({ length: 5 }).map((_, i) => <Card key={i} className="p-4"><Skeleton className="h-8 w-full" /></Card>)
+        ) : (
+          <>
+            <StatCard label="Matches" value={s ? n(s.matches ?? 0) : "—"} />
+            <StatCard label="Completed" value={s ? n(s.completedMatches ?? 0) : "—"} />
+            <StatCard label="Teams" value={s ? n(s.teams ?? 0) : "—"} />
+            <StatCard label="Goals" value={s ? n(s.goals ?? 0) : "—"} />
+            <StatCard label="Avg Goals" value={s ? f(s.averageGoalsPerMatch).toFixed(2) : "—"} />
+          </>
+        )}
+      </div>
+      <Tabs tabs={["Overview", "Fixtures", "Results"]} active={tab} onChange={setTab} />
+
+      {tab === "Overview" && (
+        <Card className="p-5">
+          {stats.loading ? <Skeleton className="h-12 w-full" /> : (
+            <p className="text-sm text-muted-foreground">
+              Season <strong className="text-foreground">{season.name}</strong> — {season.startDate} to {season.endDate}.
+              {s && ` ${n(s.completedMatches ?? 0)} of ${n(s.matches ?? 0)} matches completed.`}
+            </p>
+          )}
+        </Card>
+      )}
+
+      {(tab === "Fixtures" || tab === "Results") && (
+        <Card className="overflow-hidden">
+          {seasonMatches.loading ? (
+            <div className="p-5 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+          ) : seasonMatches.error ? (
+            <p className="text-sm text-muted-foreground text-center py-10">Could not load matches</p>
+          ) : (
             <Table>
               <thead>
                 <tr>
-                  <Th>#</Th><Th>Team</Th><Th className="text-center">P</Th><Th className="text-center">W</Th>
-                  <Th className="text-center">D</Th><Th className="text-center">L</Th>
-                  <Th className="text-center">GD</Th><Th className="text-center font-bold">Pts</Th><Th>Form</Th>
+                  <Th>Date</Th><Th>Home</Th><Th className="text-center">Score</Th><Th>Away</Th>
+                  <Th>Venue</Th><Th>Status</Th>
                 </tr>
               </thead>
               <tbody>
-                {standings.map(row => (
-                  <Tr key={row.pos}>
-                    <Td className="text-muted-foreground font-mono text-xs">{row.pos}</Td>
-                    <Td><div className="flex items-center gap-2"><Avatar initials={row.team.slice(0,2)} size="sm" /><span className="font-medium">{row.team}</span></div></Td>
-                    <Td className="text-center font-mono text-xs">{row.played}</Td>
-                    <Td className="text-center font-mono text-xs">{row.won}</Td>
-                    <Td className="text-center font-mono text-xs">{row.drawn}</Td>
-                    <Td className="text-center font-mono text-xs">{row.lost}</Td>
-                    <Td className="text-center font-mono text-xs">{row.gd > 0 ? `+${row.gd}` : row.gd}</Td>
-                    <Td className="text-center font-mono font-bold">{row.points}</Td>
-                    <Td><div className="flex items-center gap-0.5">{row.form.map((r,i) => <FormBadge key={i} result={r} />)}</div></Td>
-                  </Tr>
-                ))}
+                {(seasonMatches.data ?? [])
+                  .filter((m: MatchView) => tab === "Fixtures" ? m.status === "Upcoming" : m.status === "Completed")
+                  .map((m: MatchView) => (
+                    <Tr key={m.id}>
+                      <Td className="font-mono text-xs text-muted-foreground whitespace-nowrap">{m.date}</Td>
+                      <Td className="font-medium text-sm">{m.homeTeam}</Td>
+                      <Td className="text-center font-mono font-bold">
+                        {m.homeGoals !== null ? `${m.homeGoals} – ${m.awayGoals}` : "vs"}
+                      </Td>
+                      <Td className="font-medium text-sm">{m.awayTeam}</Td>
+                      <Td className="text-xs text-muted-foreground">{m.venue}</Td>
+                      <Td><Badge variant={m.status === "Completed" ? "success" : "muted"}>{m.status}</Badge></Td>
+                    </Tr>
+                  ))}
               </tbody>
             </Table>
-          </Card>
-        )}
-        {tab !== "Standings" && (
-          <Card className="p-8 text-center"><p className="text-muted-foreground text-sm">{tab} for {season.name}</p></Card>
-        )}
-      </div>
-    );
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+export default function Seasons({ onNavigate }: { onNavigate: (page: string, id?: string) => void }) {
+  const [selected, setSelected] = useState<SeasonView | null>(null);
+  const [search, setSearch] = useState("");
+
+  const { data: seasons, loading, error } = useQuery(fetchSeasons);
+
+  if (selected) {
+    return <SeasonDetail season={selected} onBack={() => setSelected(null)} />;
   }
 
-  const filtered = seasons.filter(s =>
+  const filtered = (seasons ?? []).filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     s.competition.toLowerCase().includes(search.toLowerCase())
   );
@@ -84,28 +122,34 @@ export default function Seasons({ onNavigate }: { onNavigate: (page: string, id?
         <Input placeholder="Search seasons…" value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
       </div>
       <Card className="overflow-hidden">
-        <Table>
-          <thead>
-            <tr>
-              <Th>Season</Th><Th>Competition</Th><Th>Status</Th>
-              <Th className="text-center">Matches</Th><Th className="text-center">Teams</Th>
-              <Th>Period</Th><Th></Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(s => (
-              <Tr key={s.id} onClick={() => setSelected(s.id)}>
-                <Td><span className="font-semibold font-mono">{s.name}</span></Td>
-                <Td className="text-sm">{s.competition}</Td>
-                <Td><Badge variant={s.isCurrent ? "success" : "muted"}>{s.status}</Badge></Td>
-                <Td className="text-center font-mono text-xs">{s.matches}</Td>
-                <Td className="text-center font-mono text-xs">{s.teams}</Td>
-                <Td className="text-xs text-muted-foreground font-mono">{s.startDate} → {s.endDate}</Td>
-                <Td><Button variant="ghost" className="text-xs">View →</Button></Td>
-              </Tr>
-            ))}
-          </tbody>
-        </Table>
+        {loading ? (
+          <div className="p-5 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+        ) : error ? (
+          <p className="text-sm text-muted-foreground text-center py-10">Could not load seasons. Check API connectivity.</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-10">No seasons found</p>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Season</Th><Th>Status</Th>
+                <Th>Period</Th><Th></Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => (
+                <Tr key={s.id} onClick={() => setSelected(s)}>
+                  <Td><span className="font-semibold font-mono">{s.name}</span></Td>
+                  <Td><Badge variant={s.isCurrent ? "success" : "muted"}>{s.status}</Badge></Td>
+                  <Td className="text-xs text-muted-foreground font-mono">
+                    {s.startDate} {s.endDate ? `→ ${s.endDate}` : ""}
+                  </Td>
+                  <Td><Button variant="ghost" className="text-xs">View →</Button></Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
       </Card>
     </div>
   );

@@ -1,61 +1,166 @@
-import { useState } from "react";
-import { Card, Button, Select, FormSection, StatInput, Textarea, Toast, PageHeader, Input } from "../components/ui";
-import { matches, players, teams } from "../data/mockData";
+import { useState, useEffect } from "react";
+import { Card, Button, Select, FormSection, StatInput, Textarea, Toast, PageHeader } from "../components/ui";
+import { useQuery } from "../hooks/useApi";
+import {
+  fetchMatches, fetchTeams, fetchTeamPlayers, createPlayerMatchStats, n
+} from "../services/api";
+import type { MatchView, PlayerView } from "../services/api";
+import type { GetTeamDTO } from "../imports";
 
 const defaultStats = {
-  // General
-  minutesPlayed: "", rating: "",
+  minutesPlayed: "", fotmobRating: "", sofascoreRating: "",
   started: true, isCaptain: false, isManOfTheMatch: false, wasSubstitutedOn: false, wasSubstitutedOff: false,
-  // Attack
-  goals: "", shots: "", shotsOnTarget: "", xG: "", chancesCreated: "", assists: "",
-  // Passing
-  passesCompleted: "", passesAttempted: "", keyPasses: "", crossesCompleted: "", longBalls: "",
-  // Defending
-  tackles: "", interceptions: "", clearances: "", blocks: "",
-  // Duels
-  groundDuelsWon: "", groundDuelsTotal: "", aerialDuelsWon: "", aerialDuelsTotal: "",
-  // Discipline
+  goals: "", shots: "", shotsOnTarget: "", xG: "", xGOT: "", chancesCreated: "", assists: "", xa: "",
+  touches: "", passesCompleted: "", passesAttempted: "", keyPasses: "", crossesCompleted: "", crossesAttempted: "", longBalls: "", longBallsAttempted: "",
+  defensiveContributions: "", tackles: "", interceptions: "", clearances: "", blocks: "", recoveries: "", headedClearances: "", dribbledPast: "",
+  duelsWon: "", duelsLost: "", groundDuelsWon: "", totalGroundDuels: "", aerialDuelsWon: "", totalAerialDuels: "",
   foulsCommitted: "", foulsSuffered: "", yellowCards: "", redCards: "",
-  // GK only
-  gkSaves: "", gkGoalsConceded: "", gkXGOT: "", gkHighClaims: "", gkSweeper: "",
-  // Analysis
-  analystNotes: "", performanceSummary: "",
+  gkSaves: "", gkGoalsConceded: "", gkXGOT: "", gkHighClaims: "", gkSweeper: "", gkGoalsPrevented: "",
+  gkLongBalls: "", gkAccurateLongBalls: "", gkPasses: "", gkAccuratePasses: "",
+  performanceSummary: "", analystNotes: "",
 };
 
-const allPlayers = players;
-const TOTAL = allPlayers.length;
+const pf = (s: string) => s ? parseFloat(s) : undefined;
+const pi = (s: string) => s ? parseInt(s, 10) : undefined;
 
 export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: string) => void }) {
   const [stats, setStats] = useState(defaultStats);
-  const [matchId, setMatchId] = useState(matches[0].id);
-  const [teamId, setTeamId] = useState(teams[0].id);
-  const [playerId, setPlayerId] = useState(allPlayers[0].id);
+  const [matchId, setMatchId] = useState("");
+  const [teamId, setTeamId] = useState("");
+  const [playerId, setPlayerId] = useState("");
   const [playerIdx, setPlayerIdx] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<"success" | "error">("success");
   const [saving, setSaving] = useState(false);
 
-  const s = (field: keyof typeof stats) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-    setStats(prev => ({ ...prev, [field]: e.target.value }));
+  const { data: matches, loading: matchesLoading } = useQuery(fetchMatches);
+  const { data: teams, loading: teamsLoading } = useQuery(fetchTeams);
+  const { data: teamPlayers, loading: playersLoading } = useQuery(
+    () => teamId ? fetchTeamPlayers(teamId) : Promise.resolve([]),
+    [teamId]
+  );
+
+  useEffect(() => {
+    if (teamPlayers && teamPlayers.length > 0) {
+      setPlayerId(teamPlayers[0].id);
+      setPlayerIdx(0);
+    }
+  }, [teamPlayers]);
+
+  const s = (field: keyof typeof stats) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      setStats(prev => ({ ...prev, [field]: e.target.value }));
 
   const toggle = (field: "started" | "isCaptain" | "isManOfTheMatch" | "wasSubstitutedOn" | "wasSubstitutedOff") =>
     setStats(prev => ({ ...prev, [field]: !prev[field] }));
 
-  const teamPlayers = allPlayers.filter(p => p.teamId === teamId);
-  const currentPlayer = allPlayers.find(p => p.id === playerId) || allPlayers[0];
-  const isGK = currentPlayer.position === "Goalkeeper";
+  const currentPlayer = (teamPlayers ?? []).find((p: PlayerView) => p.id === playerId) || (teamPlayers ?? [])[0];
+  const isGK = currentPlayer?.position === "Goalkeeper";
 
   const save = async (next?: boolean) => {
+    if (!matchId || !teamId || !playerId) {
+      setToastType("error");
+      setToast("Please select match, team, and player");
+      return;
+    }
     setSaving(true);
-    await new Promise(r => setTimeout(r, 500));
-    setSaving(false);
-    if (next) {
-      const nextIdx = Math.min(playerIdx + 1, teamPlayers.length - 1);
-      setPlayerIdx(nextIdx);
-      setPlayerId(teamPlayers[nextIdx]?.id || playerId);
-      setStats(defaultStats);
-      setToast("Saved — next player loaded");
-    } else {
-      setToast("Player match stats saved");
+    try {
+      await createPlayerMatchStats({
+        matchId,
+        playerId,
+        teamId,
+        started: stats.started,
+        wasSubstitutedOn: stats.wasSubstitutedOn,
+        wasSubstitutedOff: stats.wasSubstitutedOff,
+        isCaptain: stats.isCaptain,
+        isManOfTheMatch: stats.isManOfTheMatch,
+        analysis: (stats.performanceSummary || stats.analystNotes) ? {
+          performanceSummary: stats.performanceSummary || undefined,
+          analystNotes: stats.analystNotes || undefined,
+        } : null,
+        playerStats: {
+          minutesPlayed: pi(stats.minutesPlayed) as any,
+          fotmobRating: pf(stats.fotmobRating) as any,
+          sofascoreRating: pf(stats.sofascoreRating) as any,
+        },
+        playerAttack: {
+          goals: pi(stats.goals) as any,
+          xg: pf(stats.xG) as any,
+          xgot: pf(stats.xGOT) as any,
+          totalShots: pi(stats.shots) as any,
+          shotsOnTarget: pi(stats.shotsOnTarget) as any,
+          touchesInOppositionBox: undefined,
+          bigChancesMissed: undefined,
+          successfulDribbles: undefined,
+          dribblesAttempted: undefined,
+        },
+        playerPasses: {
+          touches: pi(stats.touches) as any,
+          accuratePasses: pi(stats.passesCompleted) as any,
+          passesAttempted: pi(stats.passesAttempted) as any,
+          assists: pi(stats.assists) as any,
+          xa: pf(stats.xa) as any,
+          chancesCreated: pi(stats.chancesCreated) as any,
+          passesIntoFinalThird: undefined,
+          accurateCrosses: pi(stats.crossesCompleted) as any,
+          crossesAttempted: pi(stats.crossesAttempted) as any,
+          accurateLongBalls: pi(stats.longBalls) as any,
+          longBallsAttempted: pi(stats.longBallsAttempted) as any,
+        },
+        playerDefence: {
+          defensiveContributions: pi(stats.defensiveContributions) as any,
+          tackles: pi(stats.tackles) as any,
+          interceptions: pi(stats.interceptions) as any,
+          blocks: pi(stats.blocks) as any,
+          recoveries: pi(stats.recoveries) as any,
+          clearance: pi(stats.clearances) as any,
+          headedClearances: pi(stats.headedClearances) as any,
+          dribbledPast: pi(stats.dribbledPast) as any,
+        },
+        playerDuels: {
+          duelsWon: pi(stats.duelsWon) as any,
+          duelsLost: pi(stats.duelsLost) as any,
+          groundDuelsWon: pi(stats.groundDuelsWon) as any,
+          totalGroundDuels: pi(stats.totalGroundDuels) as any,
+          aerialDuelsWon: pi(stats.aerialDuelsWon) as any,
+          totalAerialDuels: pi(stats.totalAerialDuels) as any,
+        },
+        goalkeepering: {
+          saves: pi(stats.gkSaves) as any,
+          goalsConceded: pi(stats.gkGoalsConceded) as any,
+          facedxGOT: pf(stats.gkXGOT) as any,
+          goalsPrevented: pf(stats.gkGoalsPrevented) as any,
+          actedAsSweeper: pi(stats.gkSweeper) as any,
+          highClaim: pi(stats.gkHighClaims) as any,
+          longBalls: pi(stats.gkLongBalls) as any,
+          accurateLongBalls: pi(stats.gkAccurateLongBalls) as any,
+          passes: pi(stats.gkPasses) as any,
+          accuratePasses: pi(stats.gkAccuratePasses) as any,
+        },
+        playerDiscipline: {
+          yellowCards: pi(stats.yellowCards) as any,
+          redCards: pi(stats.redCards) as any,
+          foulsCommitted: pi(stats.foulsCommitted) as any,
+          wasFouled: pi(stats.foulsSuffered) as any,
+        },
+      });
+      setToastType("success");
+      if (next && teamPlayers && playerIdx < teamPlayers.length - 1) {
+        const nextIdx = playerIdx + 1;
+        setPlayerIdx(nextIdx);
+        setPlayerId(teamPlayers[nextIdx].id);
+        setStats(defaultStats);
+        setToast("Saved — next player loaded");
+      } else {
+        setToast("Player match stats saved");
+        if (next) setStats(defaultStats);
+      }
+    } catch (err) {
+      setToastType("error");
+      const msg = err instanceof Error ? err.message : "Save failed";
+      setToast(`Error: ${msg}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -69,54 +174,68 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
 
   return (
     <div className="min-h-screen">
-      {toast && <Toast message={toast} type="success" onClose={() => setToast(null)} />}
+      {toast && <Toast message={toast} type={toastType} onClose={() => setToast(null)} />}
 
       <PageHeader
         title="Player Match Stats"
-        subtitle={`Player ${playerIdx + 1} of ${teamPlayers.length}`}
+        subtitle={teamPlayers && teamPlayers.length > 0 ? `Player ${playerIdx + 1} of ${teamPlayers.length}` : "Select a team to begin"}
         breadcrumb={["Player Match Stats"]}
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="secondary" disabled={playerIdx === 0} onClick={() => {
-              const prev = Math.max(0, playerIdx - 1);
-              setPlayerIdx(prev); setPlayerId(teamPlayers[prev]?.id || playerId); setStats(defaultStats);
-            }}>← Prev</Button>
-            <Button variant="secondary" disabled={playerIdx >= teamPlayers.length - 1} onClick={() => {
-              const next = Math.min(teamPlayers.length - 1, playerIdx + 1);
-              setPlayerIdx(next); setPlayerId(teamPlayers[next]?.id || playerId); setStats(defaultStats);
-            }}>Next →</Button>
+            <Button variant="secondary" disabled={playerIdx === 0 || !teamPlayers?.length}
+              onClick={() => {
+                const prev = Math.max(0, playerIdx - 1);
+                setPlayerIdx(prev);
+                setPlayerId((teamPlayers ?? [])[prev]?.id ?? "");
+                setStats(defaultStats);
+              }}>← Prev</Button>
+            <Button variant="secondary" disabled={!teamPlayers?.length || playerIdx >= (teamPlayers?.length ?? 0) - 1}
+              onClick={() => {
+                const next = Math.min((teamPlayers?.length ?? 1) - 1, playerIdx + 1);
+                setPlayerIdx(next);
+                setPlayerId((teamPlayers ?? [])[next]?.id ?? "");
+                setStats(defaultStats);
+              }}>Next →</Button>
           </div>
         }
       />
 
       {/* Progress bar */}
-      <div className="mb-5">
-        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-          <span>{currentPlayer.firstName} {currentPlayer.lastName} · {currentPlayer.position}</span>
-          <span>{playerIdx + 1} / {teamPlayers.length}</span>
+      {teamPlayers && teamPlayers.length > 0 && (
+        <div className="mb-5">
+          <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
+            <span>{currentPlayer?.firstName} {currentPlayer?.lastName} · {currentPlayer?.position}</span>
+            <span>{playerIdx + 1} / {teamPlayers.length}</span>
+          </div>
+          <div className="h-1 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-primary transition-all" style={{ width: `${((playerIdx + 1) / teamPlayers.length) * 100}%` }} />
+          </div>
         </div>
-        <div className="h-1 bg-muted rounded-full overflow-hidden">
-          <div className="h-full bg-primary transition-all" style={{ width: `${((playerIdx + 1) / teamPlayers.length) * 100}%` }} />
-        </div>
-      </div>
+      )}
 
       {/* Context */}
       <Card className="p-4 mb-5">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Select label="Match" value={matchId} onChange={e => setMatchId(e.target.value)}>
-            {matches.map(m => <option key={m.id} value={m.id}>{m.homeTeam} vs {m.awayTeam} ({m.date})</option>)}
+          <Select label="Match" value={matchId} onChange={e => setMatchId(e.target.value)} disabled={matchesLoading}>
+            <option value="">— Select Match —</option>
+            {(matches ?? []).map((m: MatchView) => (
+              <option key={m.id} value={m.id}>{m.homeTeam} vs {m.awayTeam} ({m.date})</option>
+            ))}
           </Select>
-          <Select label="Team" value={teamId} onChange={e => { setTeamId(e.target.value); setPlayerIdx(0); }}>
-            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          <Select label="Team" value={teamId} onChange={e => { setTeamId(e.target.value); setPlayerIdx(0); setPlayerId(""); }} disabled={teamsLoading}>
+            <option value="">— Select Team —</option>
+            {(teams ?? []).map((t: GetTeamDTO) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
-          <Select label="Player" value={playerId} onChange={e => { setPlayerId(e.target.value); }}>
-            {teamPlayers.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.position})</option>)}
+          <Select label="Player" value={playerId} onChange={e => setPlayerId(e.target.value)} disabled={playersLoading || !teamId}>
+            <option value="">— Select Player —</option>
+            {(teamPlayers ?? []).map((p: PlayerView) => (
+              <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.position})</option>
+            ))}
           </Select>
         </div>
       </Card>
 
       <div className="space-y-4 pb-24">
-        {/* Player Status */}
         <FormSection title="Player Status">
           <div className="flex flex-wrap gap-4">
             <CheckBox field="started" label="Started" />
@@ -127,15 +246,14 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
           </div>
         </FormSection>
 
-        {/* General */}
         <FormSection title="General">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-md">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-sm">
             <StatInput label="Minutes Played" value={stats.minutesPlayed} onChange={s("minutesPlayed")} />
-            <StatInput label="Rating (1–10)" value={stats.rating} onChange={s("rating")} step="0.1" max={10} />
+            <StatInput label="Fotmob Rating" value={stats.fotmobRating} onChange={s("fotmobRating")} step="0.1" max={10} />
+            <StatInput label="Sofa Rating" value={stats.sofascoreRating} onChange={s("sofascoreRating")} step="0.1" max={10} />
           </div>
         </FormSection>
 
-        {/* Attack */}
         <FormSection title="Attack">
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             <StatInput label="Goals" value={stats.goals} onChange={s("goals")} />
@@ -143,41 +261,48 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
             <StatInput label="Shots" value={stats.shots} onChange={s("shots")} />
             <StatInput label="On Target" value={stats.shotsOnTarget} onChange={s("shotsOnTarget")} />
             <StatInput label="xG" value={stats.xG} onChange={s("xG")} />
+            <StatInput label="xGOT" value={stats.xGOT} onChange={s("xGOT")} />
+            <StatInput label="xA" value={stats.xa} onChange={s("xa")} />
             <StatInput label="Chances Created" value={stats.chancesCreated} onChange={s("chancesCreated")} />
           </div>
         </FormSection>
 
-        {/* Passing */}
         <FormSection title="Passing">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatInput label="Touches" value={stats.touches} onChange={s("touches")} />
             <StatInput label="Passes Completed" value={stats.passesCompleted} onChange={s("passesCompleted")} />
             <StatInput label="Passes Attempted" value={stats.passesAttempted} onChange={s("passesAttempted")} />
-            <StatInput label="Key Passes" value={stats.keyPasses} onChange={s("keyPasses")} />
             <StatInput label="Crosses Completed" value={stats.crossesCompleted} onChange={s("crossesCompleted")} />
+            <StatInput label="Crosses Attempted" value={stats.crossesAttempted} onChange={s("crossesAttempted")} />
+            <StatInput label="Long Balls" value={stats.longBalls} onChange={s("longBalls")} />
+            <StatInput label="Long Balls Attempted" value={stats.longBallsAttempted} onChange={s("longBallsAttempted")} />
           </div>
         </FormSection>
 
-        {/* Defending */}
         <FormSection title="Defending">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatInput label="Defensive Contributions" value={stats.defensiveContributions} onChange={s("defensiveContributions")} />
             <StatInput label="Tackles" value={stats.tackles} onChange={s("tackles")} />
             <StatInput label="Interceptions" value={stats.interceptions} onChange={s("interceptions")} />
             <StatInput label="Clearances" value={stats.clearances} onChange={s("clearances")} />
             <StatInput label="Blocks" value={stats.blocks} onChange={s("blocks")} />
+            <StatInput label="Recoveries" value={stats.recoveries} onChange={s("recoveries")} />
+            <StatInput label="Headed Clearances" value={stats.headedClearances} onChange={s("headedClearances")} />
+            <StatInput label="Dribbled Past" value={stats.dribbledPast} onChange={s("dribbledPast")} />
           </div>
         </FormSection>
 
-        {/* Duels */}
         <FormSection title="Duels">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatInput label="Duels Won" value={stats.duelsWon} onChange={s("duelsWon")} />
+            <StatInput label="Duels Lost" value={stats.duelsLost} onChange={s("duelsLost")} />
             <StatInput label="Ground Duels Won" value={stats.groundDuelsWon} onChange={s("groundDuelsWon")} />
-            <StatInput label="Ground Duels Total" value={stats.groundDuelsTotal} onChange={s("groundDuelsTotal")} />
+            <StatInput label="Ground Duels Total" value={stats.totalGroundDuels} onChange={s("totalGroundDuels")} />
             <StatInput label="Aerial Duels Won" value={stats.aerialDuelsWon} onChange={s("aerialDuelsWon")} />
-            <StatInput label="Aerial Duels Total" value={stats.aerialDuelsTotal} onChange={s("aerialDuelsTotal")} />
+            <StatInput label="Aerial Duels Total" value={stats.totalAerialDuels} onChange={s("totalAerialDuels")} />
           </div>
         </FormSection>
 
-        {/* Discipline */}
         <FormSection title="Discipline">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-xs">
             <StatInput label="Fouls Committed" value={stats.foulsCommitted} onChange={s("foulsCommitted")} />
@@ -187,20 +312,23 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
           </div>
         </FormSection>
 
-        {/* GK Only */}
         {isGK && (
           <FormSection title="Goalkeeping">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <StatInput label="Saves" value={stats.gkSaves} onChange={s("gkSaves")} />
               <StatInput label="Goals Conceded" value={stats.gkGoalsConceded} onChange={s("gkGoalsConceded")} />
               <StatInput label="xGOT Faced" value={stats.gkXGOT} onChange={s("gkXGOT")} />
+              <StatInput label="Goals Prevented" value={stats.gkGoalsPrevented} onChange={s("gkGoalsPrevented")} />
               <StatInput label="High Claims" value={stats.gkHighClaims} onChange={s("gkHighClaims")} />
               <StatInput label="Acted as Sweeper" value={stats.gkSweeper} onChange={s("gkSweeper")} />
+              <StatInput label="Long Balls" value={stats.gkLongBalls} onChange={s("gkLongBalls")} />
+              <StatInput label="Accurate Long Balls" value={stats.gkAccurateLongBalls} onChange={s("gkAccurateLongBalls")} />
+              <StatInput label="Passes" value={stats.gkPasses} onChange={s("gkPasses")} />
+              <StatInput label="Accurate Passes" value={stats.gkAccuratePasses} onChange={s("gkAccuratePasses")} />
             </div>
           </FormSection>
         )}
 
-        {/* Analyst Notes */}
         <FormSection title="Analyst Notes">
           <div className="space-y-3">
             <Textarea label="Performance Summary" value={stats.performanceSummary} onChange={s("performanceSummary")}
@@ -214,12 +342,13 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
       {/* Sticky action bar */}
       <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-card/90 backdrop-blur-sm px-6 py-3 flex items-center justify-between z-40">
         <div className="text-xs text-muted-foreground">
-          Player <span className="font-semibold text-foreground">{playerIdx + 1}</span> of <span className="font-semibold text-foreground">{teamPlayers.length}</span>
-          {" · "}{currentPlayer.firstName} {currentPlayer.lastName} · {currentPlayer.position}
+          {currentPlayer
+            ? <>Player <span className="font-semibold text-foreground">{playerIdx + 1}</span> of <span className="font-semibold text-foreground">{(teamPlayers ?? []).length}</span> · {currentPlayer.firstName} {currentPlayer.lastName} · {currentPlayer.position}</>
+            : "Select a match, team, and player"}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" onClick={() => onNavigate("matches")}>Cancel</Button>
-          <Button variant="secondary" onClick={() => save(true)} disabled={saving || playerIdx >= teamPlayers.length - 1}>
+          <Button variant="secondary" onClick={() => save(true)} disabled={saving || playerIdx >= (teamPlayers?.length ?? 1) - 1}>
             Save &amp; Next Player
           </Button>
           <Button variant="primary" onClick={() => save(false)} disabled={saving}>

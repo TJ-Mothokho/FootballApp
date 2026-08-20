@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Dashboard from "./pages/Dashboard";
 import Competitions from "./pages/Competitions";
 import Seasons from "./pages/Seasons";
@@ -9,7 +9,15 @@ import TeamMatchStats from "./pages/TeamMatchStats";
 import PlayerMatchStats from "./pages/PlayerMatchStats";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
-import { notifications } from "./data/mockData";
+import { searchAll } from "./services/api";
+import type { SearchResultDTO } from "./imports";
+
+// Keep only notifications here — no API equivalent
+const notifications = [
+  { id: "n1", text: "Match data entered: Pirates vs Chiefs", time: "2h ago", read: false },
+  { id: "n2", text: "Player stats pending for MW3", time: "5h ago", read: false },
+  { id: "n3", text: "Season report generated", time: "1d ago", read: true },
+];
 
 type Page = "dashboard" | "competitions" | "seasons" | "teams" | "players" | "matches" | "match-detail" |
   "team-match-stats" | "player-match-stats" | "reports" | "settings";
@@ -26,18 +34,52 @@ const navItems: { id: Page | string; label: string; icon: string }[] = [
   { id: "reports", label: "Reports", icon: "📄" },
 ];
 
-// Global search overlay
-function SearchOverlay({ onClose, onNavigate }: { onClose: () => void; onNavigate: (page: string) => void }) {
+// Group SearchResultDTO[] by type
+function groupSearchResults(results: SearchResultDTO[]) {
+  const groups: Record<string, SearchResultDTO[]> = {};
+  results.forEach(r => {
+    const key = r.type ?? "Other";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  });
+  return Object.entries(groups);
+}
+
+function pageForType(type: string): Page {
+  const map: Record<string, Page> = {
+    Team: "teams", Player: "players", Match: "matches",
+    Competition: "competitions", Season: "seasons",
+  };
+  return map[type] ?? "dashboard";
+}
+
+function SearchOverlay({ onClose, onNavigate }: { onClose: () => void; onNavigate: (page: string, id?: string) => void }) {
   const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResultDTO[]>([]);
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(null!);
+
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const results = query.length > 1 ? [
-    { group: "Teams", items: ["Orlando Pirates", "Mamelodi Sundowns", "Kaizer Chiefs"].filter(t => t.toLowerCase().includes(query.toLowerCase())), page: "teams" },
-    { group: "Players", items: ["Evidence Makgopa", "Peter Shalulile", "Thabo Nodada", "Yusuf Maart"].filter(p => p.toLowerCase().includes(query.toLowerCase())), page: "players" },
-    { group: "Competitions", items: ["Betway Premiership", "Nedbank Cup"].filter(c => c.toLowerCase().includes(query.toLowerCase())), page: "competitions" },
-    { group: "Matches", items: ["Orlando Pirates 2–1 Kaizer Chiefs", "Mamelodi Sundowns 3–0 Stellenbosch FC"].filter(m => m.toLowerCase().includes(query.toLowerCase())), page: "matches" },
-  ].filter(g => g.items.length > 0) : [];
+  useEffect(() => {
+    if (query.length < 2) { setResults([]); return; }
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await searchAll(query);
+        setResults(data);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timerRef.current);
+  }, [query]);
+
+  const grouped = groupSearchResults(results);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4" onClick={onClose}>
@@ -53,19 +95,25 @@ function SearchOverlay({ onClose, onNavigate }: { onClose: () => void; onNavigat
           />
           <kbd className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">ESC</kbd>
         </div>
-        {results.length === 0 && query.length > 1 && (
+        {searching && (
+          <div className="px-4 py-4 text-xs text-muted-foreground">Searching…</div>
+        )}
+        {!searching && query.length > 1 && results.length === 0 && (
           <div className="px-4 py-6 text-center text-sm text-muted-foreground">No results for "{query}"</div>
         )}
-        {results.length === 0 && query.length <= 1 && (
+        {!searching && query.length <= 1 && (
           <div className="px-4 py-4 text-xs text-muted-foreground">Start typing to search across teams, players, matches, and competitions.</div>
         )}
-        {results.map(group => (
-          <div key={group.group} className="py-1">
-            <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{group.group}</div>
-            {group.items.map(item => (
-              <button key={item} className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                onClick={() => { onNavigate(group.page); onClose(); }}>
-                {item}
+        {grouped.map(([type, items]) => (
+          <div key={type} className="py-1">
+            <div className="px-4 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{type}s</div>
+            {items.slice(0, 5).map(item => (
+              <button
+                key={item.id}
+                className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                onClick={() => { onNavigate(pageForType(item.type), item.id); onClose(); }}
+              >
+                {item.name}
               </button>
             ))}
           </div>
@@ -98,10 +146,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const navigate = (p: string, id?: string) => {
+  const navigate = useCallback((p: string, id?: string) => {
     setPage(p as Page);
     setSelectedId(id);
-  };
+  }, []);
 
   const unread = notifications.filter(n => !n.read).length;
 
@@ -123,8 +171,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Search overlay */}
-      {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={p => { navigate(p); setSearchOpen(false); }} />}
+      {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={navigate} />}
 
       {/* Sidebar */}
       <aside
@@ -141,7 +188,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Context (competition + season) */}
+        {/* Context pill */}
         {!sidebarCollapsed && (
           <div className="px-3 py-2 border-b border-border">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Context</p>
@@ -200,11 +247,10 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
         <header className="h-[52px] border-b border-border bg-card flex items-center gap-3 px-4 flex-shrink-0">
-          {/* Search */}
           <button
             onClick={() => setSearchOpen(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted text-muted-foreground text-sm hover:text-foreground transition-colors flex-1 max-w-xs"
@@ -215,7 +261,6 @@ export default function App() {
           </button>
 
           <div className="flex items-center gap-2 ml-auto">
-            {/* Competition selector */}
             <select
               value={competition}
               onChange={e => setCompetition(e.target.value)}
@@ -225,7 +270,6 @@ export default function App() {
               <option>Nedbank Cup</option>
               <option>MTN8</option>
             </select>
-            {/* Season selector */}
             <select
               value={season}
               onChange={e => setSeason(e.target.value)}
@@ -236,7 +280,6 @@ export default function App() {
               <option>2024/2025</option>
             </select>
 
-            {/* Dark mode toggle */}
             <button
               onClick={() => setDarkMode(!darkMode)}
               className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -245,7 +288,6 @@ export default function App() {
               {darkMode ? "☀" : "◑"}
             </button>
 
-            {/* Notifications */}
             <div className="relative">
               <button
                 onClick={() => setNotifOpen(!notifOpen)}
@@ -269,7 +311,6 @@ export default function App() {
               )}
             </div>
 
-            {/* User */}
             <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-semibold cursor-pointer">
               A
             </div>
@@ -279,7 +320,6 @@ export default function App() {
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-7xl mx-auto px-5 py-5">
-            {/* Page title for dashboard */}
             {page === "dashboard" && (
               <div className="mb-5">
                 <h1 className="text-xl font-bold text-foreground font-display">Football Intelligence</h1>
