@@ -42,6 +42,18 @@ import {
   type Goalkeepering,
   type PlayerDiscipline,
   type PlayerAnalysis,
+  type CreateCompetitionDTO,
+  type UpdateCompetitionDTO,
+  type CreateSeasonDTO,
+  type UpdateSeasonDTO,
+  type CreateTeamDTO,
+  type UpdateTeamDTO,
+  type CreatePlayerDTO,
+  type UpdatePlayerDTO,
+  type CreateMatchDTO,
+  type UpdateMatchDTO,
+  type UpdateTeamMatchStatsDTO,
+  type UpdatePlayerMatchStatsDTO,
 } from "../imports";
 
 // Singleton API instances (no configuration needed — BASE_PATH is baked into base.ts)
@@ -326,6 +338,15 @@ export const fetchCompetitionFixtures = (id: string) =>
 export const fetchCompetitionResults = (id: string) =>
   competitionApi.apiCompetitionIdResultsGet(id).then(r => r.data.map(mapMatch));
 
+export const createCompetition = (dto: CreateCompetitionDTO) =>
+  competitionApi.apiCompetitionCreatePost(dto).then(r => r.data);
+
+export const updateCompetition = (id: string, dto: UpdateCompetitionDTO) =>
+  competitionApi.apiCompetitionUpdatePut(dto, id).then(r => r.data);
+
+export const deleteCompetition = (id: string) =>
+  competitionApi.apiCompetitionDeleteIdDelete(id).then(r => r.data);
+
 // ---------------------------------------------------------------------------
 // Season services
 // ---------------------------------------------------------------------------
@@ -357,6 +378,15 @@ export const fetchSeasonTeams = (id: string) =>
 
 export const fetchSeasonPlayers = (id: string) =>
   seasonApi.apiSeasonIdPlayersGet(id).then(r => r.data.map(mapPlayer));
+
+export const createSeason = (dto: CreateSeasonDTO) =>
+  seasonApi.apiSeasonCreatePost(dto).then(r => r.data);
+
+export const updateSeason = (id: string, dto: UpdateSeasonDTO) =>
+  seasonApi.apiSeasonUpdatePut(dto, id).then(r => r.data);
+
+export const deleteSeason = (id: string) =>
+  seasonApi.apiSeasonDeletePost(id).then(r => r.data);
 
 // ---------------------------------------------------------------------------
 // Team services
@@ -392,6 +422,15 @@ export const fetchTeamMostMinutes = (id: string) =>
 export const fetchTeamMostPasses = (id: string) =>
   teamApi.apiTeamIdMostPassesGet(id).then(r => r.data.map(mapLeader));
 
+export const createTeam = (dto: CreateTeamDTO) =>
+  teamApi.apiTeamCreatePost(dto).then(r => r.data);
+
+export const updateTeam = (id: string, dto: UpdateTeamDTO) =>
+  teamApi.apiTeamUpdatePut(dto, id).then(r => r.data);
+
+export const deleteTeam = (id: string) =>
+  teamApi.apiTeamDeletePost(id).then(r => r.data);
+
 // ---------------------------------------------------------------------------
 // Player services
 // ---------------------------------------------------------------------------
@@ -410,6 +449,15 @@ export const fetchPlayerMatches = (id: string) =>
 
 export const fetchPlayerRatings = (id: string) =>
   playerApi.apiPlayerIdRatingsGet(id).then(r => r.data as number[]);
+
+export const createPlayer = (dto: CreatePlayerDTO) =>
+  playerApi.apiPlayerCreatePost(dto).then(r => r.data);
+
+export const updatePlayer = (id: string, dto: UpdatePlayerDTO) =>
+  playerApi.apiPlayerUpdatePut(dto, id).then(r => r.data);
+
+export const deletePlayer = (id: string) =>
+  playerApi.apiPlayerDeletePost(id).then(r => r.data);
 
 // ---------------------------------------------------------------------------
 // Match services
@@ -433,19 +481,52 @@ export const fetchMatchTeamStats = (id: string) =>
 export const fetchMatchWorkspace = (id: string) =>
   matchApi.apiMatchIdWorkspaceGet(id).then(r => r.data);
 
+export const createMatch = (dto: CreateMatchDTO) =>
+  matchApi.apiMatchCreatePost(dto).then(r => mapMatch(r.data));
+
+export const updateMatch = (id: string, dto: UpdateMatchDTO) =>
+  matchApi.apiMatchUpdatePut(dto, id).then(r => mapMatch(r.data));
+
+export const deleteMatch = (id: string) =>
+  matchApi.apiMatchDeletePost(id).then(r => r.data);
+
 // ---------------------------------------------------------------------------
 // Team Match Stats submission
 // ---------------------------------------------------------------------------
 
+export const fetchTeamMatchStats = () =>
+  teamMatchStatsApi.apiTeamMatchStatsAllGet().then(r => r.data);
+
+export const fetchTeamMatchStat = (id: string) =>
+  teamMatchStatsApi.apiTeamMatchStatsIdGet(id).then(r => r.data);
+
 export const createTeamMatchStats = (dto: CreateTeamMatchStatsDTO) =>
   teamMatchStatsApi.apiTeamMatchStatsCreatePost(dto).then(r => r.data);
+
+export const updateTeamMatchStats = (id: string, dto: UpdateTeamMatchStatsDTO) =>
+  teamMatchStatsApi.apiTeamMatchStatsUpdatePut(dto, id).then(r => r.data);
+
+export const deleteTeamMatchStats = (id: string) =>
+  teamMatchStatsApi.apiTeamMatchStatsDeletePost(id).then(r => r.data);
 
 // ---------------------------------------------------------------------------
 // Player Match Stats submission
 // ---------------------------------------------------------------------------
 
+export const fetchPlayerMatchStats = () =>
+  playerMatchStatsApi.apiPlayerMatchStatsAllGet().then(r => r.data);
+
+export const fetchPlayerMatchStat = (id: string) =>
+  playerMatchStatsApi.apiPlayerMatchStatsIdGet(id).then(r => r.data);
+
 export const createPlayerMatchStats = (dto: CreatePlayerMatchStatsDTO) =>
   playerMatchStatsApi.apiPlayerMatchStatsCreatePost(dto).then(r => r.data);
+
+export const updatePlayerMatchStats = (id: string, dto: UpdatePlayerMatchStatsDTO) =>
+  playerMatchStatsApi.apiPlayerMatchStatsUpdatePut(dto, id).then(r => r.data);
+
+export const deletePlayerMatchStats = (id: string) =>
+  playerMatchStatsApi.apiPlayerMatchStatsDeletePost(id).then(r => r.data);
 
 // ---------------------------------------------------------------------------
 // Search

@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { Card, Button, Select, FormSection, StatInput, Textarea, Toast, PageHeader } from "../components/ui";
 import { useQuery } from "../hooks/useApi";
 import {
-  fetchMatches, fetchTeams, fetchTeamPlayers, createPlayerMatchStats, n
+  fetchMatches, fetchTeamPlayers, fetchPlayerMatchStats, createPlayerMatchStats, updatePlayerMatchStats, deletePlayerMatchStats, n
 } from "../services/api";
 import type { MatchView, PlayerView } from "../services/api";
-import type { GetTeamDTO } from "../imports";
+import type { GetPlayerMatchStatsDTO } from "../imports";
 
 const defaultStats = {
   minutesPlayed: "", fotmobRating: "", sofascoreRating: "",
@@ -23,9 +23,11 @@ const defaultStats = {
 const pf = (s: string) => s ? parseFloat(s) : undefined;
 const pi = (s: string) => s ? parseInt(s, 10) : undefined;
 
-export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: string) => void }) {
+export default function PlayerMatchStats({ onNavigate, initialMatchId }: { onNavigate: (page: string, id?: string) => void; initialMatchId?: string }) {
   const [stats, setStats] = useState(defaultStats);
-  const [matchId, setMatchId] = useState("");
+  const [matchId, setMatchId] = useState(initialMatchId ?? "");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState("");
   const [playerId, setPlayerId] = useState("");
   const [playerIdx, setPlayerIdx] = useState(0);
@@ -34,18 +36,18 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
   const [saving, setSaving] = useState(false);
 
   const { data: matches, loading: matchesLoading } = useQuery(fetchMatches);
-  const { data: teams, loading: teamsLoading } = useQuery(fetchTeams);
+  const entries = useQuery(fetchPlayerMatchStats);
   const { data: teamPlayers, loading: playersLoading } = useQuery(
     () => teamId ? fetchTeamPlayers(teamId) : Promise.resolve([]),
     [teamId]
   );
 
   useEffect(() => {
-    if (teamPlayers && teamPlayers.length > 0) {
+    if (teamPlayers && teamPlayers.length > 0 && !teamPlayers.some(player => player.id === playerId)) {
       setPlayerId(teamPlayers[0].id);
       setPlayerIdx(0);
     }
-  }, [teamPlayers]);
+  }, [teamPlayers, playerId]);
 
   const s = (field: keyof typeof stats) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -54,8 +56,85 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
   const toggle = (field: "started" | "isCaptain" | "isManOfTheMatch" | "wasSubstitutedOn" | "wasSubstitutedOff") =>
     setStats(prev => ({ ...prev, [field]: !prev[field] }));
 
+  const selectedMatch = (matches ?? []).find((match: MatchView) => match.id === matchId);
+  const matchTeams = selectedMatch ? [
+    { id: selectedMatch.homeTeamId, name: selectedMatch.homeTeam, isHome: true },
+    { id: selectedMatch.awayTeamId, name: selectedMatch.awayTeam, isHome: false },
+  ].filter(team => team.id) : [];
+  const currentEntries = (entries.data ?? []).filter((entry: GetPlayerMatchStatsDTO) => entry.match?.id === matchId);
   const currentPlayer = (teamPlayers ?? []).find((p: PlayerView) => p.id === playerId) || (teamPlayers ?? [])[0];
   const isGK = currentPlayer?.position === "Goalkeeper";
+
+  useEffect(() => {
+    if (initialMatchId) setMatchId(initialMatchId);
+  }, [initialMatchId]);
+
+  useEffect(() => {
+    if (!selectedMatch || editingId) return;
+    if (!matchTeams.some(team => team.id === teamId)) {
+      setTeamId(selectedMatch.homeTeamId);
+      setPlayerId("");
+      setPlayerIdx(0);
+    }
+  }, [selectedMatch, teamId, editingId]);
+
+  const chooseMatch = (id: string) => {
+    setMatchId(id);
+    setTeamId("");
+    setPlayerId("");
+    setPlayerIdx(0);
+    setEditingId(null);
+  };
+
+  const chooseTeam = (id: string) => {
+    setTeamId(id);
+    setPlayerId("");
+    setPlayerIdx(0);
+  };
+
+  const editEntry = (entry: GetPlayerMatchStatsDTO) => {
+    setEditingId(entry.id);
+    setMatchId(entry.match.id);
+    setTeamId(entry.team.id);
+    setPlayerId(entry.player.id);
+    setPlayerIdx(0);
+    const general = entry.playerStats ?? {};
+    const attack = entry.playerAttack ?? {};
+    const passes = entry.playerPasses ?? {};
+    const defence = entry.playerDefence ?? {};
+    const duels = entry.playerDuels ?? {};
+    const discipline = entry.playerDiscipline ?? {};
+    const goalkeepering = entry.goalkeepering ?? {};
+    setStats({
+      minutesPlayed: String(n(general.minutesPlayed)), fotmobRating: String(n(general.fotmobRating)), sofascoreRating: String(n(general.sofascoreRating)),
+      started: entry.started, isCaptain: entry.isCaptain, isManOfTheMatch: entry.isManOfTheMatch, wasSubstitutedOn: entry.wasSubstitutedOn, wasSubstitutedOff: entry.wasSubstitutedOff,
+      goals: String(n(attack.goals)), shots: String(n(attack.totalShots)), shotsOnTarget: String(n(attack.shotsOnTarget)), xG: String(n(attack.xg)), xGOT: String(n(attack.xgot)), chancesCreated: String(n(passes.chancesCreated)), assists: String(n(passes.assists)), xa: String(n(passes.xa)),
+      touches: String(n(passes.touches)), passesCompleted: String(n(passes.accuratePasses)), passesAttempted: String(n(passes.passesAttempted)), keyPasses: "", crossesCompleted: String(n(passes.accurateCrosses)), crossesAttempted: String(n(passes.crossesAttempted)), longBalls: String(n(passes.accurateLongBalls)), longBallsAttempted: String(n(passes.longBallsAttempted)),
+      defensiveContributions: String(n(defence.defensiveContributions)), tackles: String(n(defence.tackles)), interceptions: String(n(defence.interceptions)), clearances: String(n(defence.clearance)), blocks: String(n(defence.blocks)), recoveries: String(n(defence.recoveries)), headedClearances: String(n(defence.headedClearances)), dribbledPast: String(n(defence.dribbledPast)),
+      duelsWon: String(n(duels.duelsWon)), duelsLost: String(n(duels.duelsLost)), groundDuelsWon: String(n(duels.groundDuelsWon)), totalGroundDuels: String(n(duels.totalGroundDuels)), aerialDuelsWon: String(n(duels.aerialDuelsWon)), totalAerialDuels: String(n(duels.totalAerialDuels)),
+      foulsCommitted: String(n(discipline.foulsCommitted)), foulsSuffered: String(n(discipline.wasFouled)), yellowCards: String(n(discipline.yellowCards)), redCards: String(n(discipline.redCards)),
+      gkSaves: String(n(goalkeepering.saves)), gkGoalsConceded: String(n(goalkeepering.goalsConceded)), gkXGOT: String(n(goalkeepering.facedxGOT)), gkHighClaims: String(n(goalkeepering.highClaim)), gkSweeper: String(n(goalkeepering.actedAsSweeper)), gkGoalsPrevented: String(n(goalkeepering.goalsPrevented)),
+      gkLongBalls: String(n(goalkeepering.longBalls)), gkAccurateLongBalls: String(n(goalkeepering.accurateLongBalls)), gkPasses: String(n(goalkeepering.passes)), gkAccuratePasses: String(n(goalkeepering.accuratePasses)),
+      performanceSummary: entry.analysis?.performanceSummary ?? "", analystNotes: entry.analysis?.analystNotes ?? "",
+    });
+  };
+
+  const removeEntry = async (id: string) => {
+    setSaving(true);
+    try {
+      await deletePlayerMatchStats(id);
+      entries.refetch();
+      if (editingId === id) { setEditingId(null); setStats(defaultStats); }
+      setToastType("success");
+      setToast("Player match stats deleted successfully");
+    } catch (error) {
+      setToastType("error");
+      setToast(error instanceof Error ? error.message : "Delete failed");
+    } finally {
+      setSaving(false);
+      setDeletingId(null);
+    }
+  };
 
   const save = async (next?: boolean) => {
     if (!matchId || !teamId || !playerId) {
@@ -65,7 +144,7 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
     }
     setSaving(true);
     try {
-      await createPlayerMatchStats({
+      const payload = {
         matchId,
         playerId,
         teamId,
@@ -143,9 +222,25 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
           foulsCommitted: pi(stats.foulsCommitted) as any,
           wasFouled: pi(stats.foulsSuffered) as any,
         },
-      });
+      };
+      if (editingId) {
+        await updatePlayerMatchStats(editingId, {
+          started: payload.started, wasSubstitutedOn: payload.wasSubstitutedOn, wasSubstitutedOff: payload.wasSubstitutedOff,
+          isCaptain: payload.isCaptain, isManOfTheMatch: payload.isManOfTheMatch, analysis: payload.analysis,
+          playerStats: payload.playerStats, playerAttack: payload.playerAttack, playerPasses: payload.playerPasses,
+          playerDefence: payload.playerDefence, playerDuels: payload.playerDuels, goalkeepering: payload.goalkeepering,
+          playerDiscipline: payload.playerDiscipline,
+        });
+      } else {
+        await createPlayerMatchStats(payload);
+      }
+      entries.refetch();
       setToastType("success");
-      if (next && teamPlayers && playerIdx < teamPlayers.length - 1) {
+      if (editingId) {
+        setEditingId(null);
+        setStats(defaultStats);
+        setToast("Player match stats updated successfully");
+      } else if (next && teamPlayers && playerIdx < teamPlayers.length - 1) {
         const nextIdx = playerIdx + 1;
         setPlayerIdx(nextIdx);
         setPlayerId(teamPlayers[nextIdx].id);
@@ -216,15 +311,15 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
       {/* Context */}
       <Card className="p-4 mb-5">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Select label="Match" value={matchId} onChange={e => setMatchId(e.target.value)} disabled={matchesLoading}>
+          <Select label="Match" value={matchId} onChange={e => chooseMatch(e.target.value)} disabled={matchesLoading}>
             <option value="">— Select Match —</option>
             {(matches ?? []).map((m: MatchView) => (
               <option key={m.id} value={m.id}>{m.homeTeam} vs {m.awayTeam} ({m.date})</option>
             ))}
           </Select>
-          <Select label="Team" value={teamId} onChange={e => { setTeamId(e.target.value); setPlayerIdx(0); setPlayerId(""); }} disabled={teamsLoading}>
-            <option value="">— Select Team —</option>
-            {(teams ?? []).map((t: GetTeamDTO) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          <Select label="Team" value={teamId} onChange={e => chooseTeam(e.target.value)} disabled={!selectedMatch}>
+            <option value="">— Select a Match First —</option>
+            {matchTeams.map(team => <option key={team.id} value={team.id}>{team.name} ({team.isHome ? "Home" : "Away"})</option>)}
           </Select>
           <Select label="Player" value={playerId} onChange={e => setPlayerId(e.target.value)} disabled={playersLoading || !teamId}>
             <option value="">— Select Player —</option>
@@ -234,6 +329,15 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
           </Select>
         </div>
       </Card>
+
+      {selectedMatch && !entries.loading && currentEntries.length > 0 && (
+        <Card className="p-4 mb-5">
+          <p className="text-sm font-semibold text-foreground">Existing Player Entries</p>
+          <p className="mt-1 text-xs text-muted-foreground">Manage the records already attached to this match before adding a replacement.</p>
+          <div className="mt-3 flex flex-wrap gap-2">{currentEntries.map((entry: GetPlayerMatchStatsDTO) => <div key={entry.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"><span className="font-medium text-foreground">{entry.player.firstName} {entry.player.lastName}</span><span className="text-xs text-muted-foreground">{entry.team.name}</span><Button variant="ghost" className="text-xs" onClick={() => editEntry(entry)}>Edit</Button><Button variant="danger" className="text-xs" onClick={() => setDeletingId(entry.id)}>Delete</Button></div>)}</div>
+        </Card>
+      )}
+      {deletingId && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4"><Card className="w-full max-w-sm p-5 shadow-xl"><h2 className="font-semibold text-foreground">Delete player stats?</h2><p className="mt-2 text-sm text-muted-foreground">This player match statistics record will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setDeletingId(null)} disabled={saving}>Cancel</Button><Button variant="danger" onClick={() => removeEntry(deletingId)} disabled={saving}>{saving ? "Deleting…" : "Delete"}</Button></div></Card></div>}
 
       <div className="space-y-4 pb-24">
         <FormSection title="Player Status">
@@ -348,7 +452,7 @@ export default function PlayerMatchStats({ onNavigate }: { onNavigate: (page: st
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" onClick={() => onNavigate("matches")}>Cancel</Button>
-          <Button variant="secondary" onClick={() => save(true)} disabled={saving || playerIdx >= (teamPlayers?.length ?? 1) - 1}>
+          <Button variant="secondary" onClick={() => save(true)} disabled={saving || !!editingId || playerIdx >= (teamPlayers?.length ?? 1) - 1}>
             Save &amp; Next Player
           </Button>
           <Button variant="primary" onClick={() => save(false)} disabled={saving}>

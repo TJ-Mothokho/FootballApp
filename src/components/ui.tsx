@@ -77,6 +77,34 @@ export function Button({
   );
 }
 
+// Modal
+export function Modal({ title, children, onClose, footer, maxWidth = "max-w-xl" }: {
+  title: string; children: ReactNode; onClose: () => void; footer?: ReactNode; maxWidth?: string;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4" onMouseDown={onClose}>
+      <div className={`w-full ${maxWidth} max-h-[90vh] overflow-hidden rounded-xl border border-border bg-card shadow-2xl`} onMouseDown={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>
+          <button onClick={onClose} className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close dialog">✕</button>
+        </div>
+        <div className="max-h-[calc(90vh-132px)] overflow-y-auto p-5">{children}</div>
+        {footer && <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function ConfirmDialog({ title, message, confirmLabel = "Delete", onCancel, onConfirm, pending = false }: {
+  title: string; message: string; confirmLabel?: string; onCancel: () => void; onConfirm: () => void; pending?: boolean;
+}) {
+  return (
+    <Modal title={title} onClose={onCancel} maxWidth="max-w-md" footer={<><Button variant="secondary" onClick={onCancel} disabled={pending}>Cancel</Button><Button variant="danger" onClick={onConfirm} disabled={pending}>{pending ? "Working…" : confirmLabel}</Button></>}>
+      <p className="text-sm leading-relaxed text-muted-foreground">{message}</p>
+    </Modal>
+  );
+}
+
 // Input
 export function Input({ label, className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label?: string }) {
   return (

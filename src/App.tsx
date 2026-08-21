@@ -9,15 +9,12 @@ import TeamMatchStats from "./pages/TeamMatchStats";
 import PlayerMatchStats from "./pages/PlayerMatchStats";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
-import { searchAll } from "./services/api";
+import { searchAll, fetchCompetitions, fetchSeasons } from "./services/api";
+import { useQuery } from "./hooks/useApi";
 import type { SearchResultDTO } from "./imports";
 
-// Keep only notifications here — no API equivalent
-const notifications = [
-  { id: "n1", text: "Match data entered: Pirates vs Chiefs", time: "2h ago", read: false },
-  { id: "n2", text: "Player stats pending for MW3", time: "5h ago", read: false },
-  { id: "n3", text: "Season report generated", time: "1d ago", read: true },
-];
+// The API has no notifications endpoint, so the panel intentionally remains empty rather than displaying fake activity.
+const notifications: { id: string; text: string; time: string; read: boolean }[] = [];
 
 type Page = "dashboard" | "competitions" | "seasons" | "teams" | "players" | "matches" | "match-detail" |
   "team-match-stats" | "player-match-stats" | "reports" | "settings";
@@ -130,12 +127,24 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [competition, setCompetition] = useState("Betway Premiership");
-  const [season, setSeason] = useState("2026/2027");
+  const [competitionId, setCompetitionId] = useState("");
+  const [seasonId, setSeasonId] = useState("");
+  const competitions = useQuery(fetchCompetitions);
+  const seasons = useQuery(fetchSeasons);
+  const competition = (competitions.data ?? []).find(item => item.id === competitionId)?.name ?? "No competition selected";
+  const season = (seasons.data ?? []).find(item => item.id === seasonId)?.name ?? "No season selected";
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    if (!competitionId && competitions.data?.[0]) setCompetitionId(competitions.data[0].id);
+  }, [competitionId, competitions.data]);
+
+  useEffect(() => {
+    if (!seasonId && seasons.data?.[0]) setSeasonId(seasons.data[0].id);
+  }, [seasonId, seasons.data]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -161,8 +170,8 @@ export default function App() {
       case "teams": return <Teams onNavigate={navigate} />;
       case "players": return <Players onNavigate={navigate} selectedId={selectedId} />;
       case "matches": case "match-detail": return <Matches onNavigate={navigate} />;
-      case "team-match-stats": return <TeamMatchStats onNavigate={navigate} />;
-      case "player-match-stats": return <PlayerMatchStats onNavigate={navigate} />;
+      case "team-match-stats": return <TeamMatchStats onNavigate={navigate} initialMatchId={selectedId} />;
+      case "player-match-stats": return <PlayerMatchStats onNavigate={navigate} initialMatchId={selectedId} />;
       case "reports": return <Reports />;
       case "settings": return <Settings darkMode={darkMode} onToggleDark={() => setDarkMode(!darkMode)} />;
       default: return <Dashboard onNavigate={navigate} />;
@@ -262,22 +271,22 @@ export default function App() {
 
           <div className="flex items-center gap-2 ml-auto">
             <select
-              value={competition}
-              onChange={e => setCompetition(e.target.value)}
-              className="text-xs bg-muted border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              value={competitionId}
+              onChange={e => setCompetitionId(e.target.value)}
+              disabled={competitions.loading}
+              className="text-xs bg-muted border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
             >
-              <option>Betway Premiership</option>
-              <option>Nedbank Cup</option>
-              <option>MTN8</option>
+              {(competitions.data ?? []).length === 0 && <option value="">No competitions</option>}
+              {(competitions.data ?? []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
             <select
-              value={season}
-              onChange={e => setSeason(e.target.value)}
-              className="text-xs bg-muted border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+              value={seasonId}
+              onChange={e => setSeasonId(e.target.value)}
+              disabled={seasons.loading}
+              className="text-xs bg-muted border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono disabled:opacity-60"
             >
-              <option>2026/2027</option>
-              <option>2025/2026</option>
-              <option>2024/2025</option>
+              {(seasons.data ?? []).length === 0 && <option value="">No seasons</option>}
+              {(seasons.data ?? []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
 
             <button
@@ -301,7 +310,7 @@ export default function App() {
               {notifOpen && (
                 <div className="absolute right-0 top-10 w-72 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
                   <div className="px-3 py-2 border-b border-border text-xs font-semibold text-foreground">Notifications</div>
-                  {notifications.map(n => (
+                  {notifications.length === 0 ? <p className="px-3 py-5 text-center text-xs text-muted-foreground">No notifications available.</p> : notifications.map(n => (
                     <div key={n.id} className={`px-3 py-2.5 border-b border-border last:border-0 ${!n.read ? "bg-accent/30" : ""}`}>
                       <p className="text-xs text-foreground">{n.text}</p>
                       <p className="text-[10px] text-muted-foreground mt-0.5">{n.time}</p>

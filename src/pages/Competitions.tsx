@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Avatar, Input, Skeleton } from "../components/ui";
+import { Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Avatar, Input, Skeleton, ConfirmDialog, Toast } from "../components/ui";
 import { FormBadge } from "../components/ui";
 import { useQuery } from "../hooks/useApi";
 import {
@@ -8,15 +8,16 @@ import {
   fetchCompetitionStatistics,
   fetchCompetitionFixtures,
   fetchCompetitionResults,
-  fetchCompetitionTopScorers,
+  fetchCompetitionTopScorers, deleteCompetition,
   n, f,
   type StandingView,
   type MatchView,
   type TopPerformerView,
 } from "../services/api";
+import { CompetitionEditor } from "../components/EntityCrudForms";
 
-function CompetitionDetail({ id, name, country, currentSeason, onBack }: {
-  id: string; name: string; country: string; currentSeason: string; onBack: () => void;
+function CompetitionDetail({ id, name, country, currentSeason, onBack, onEdit, onDelete }: {
+  id: string; name: string; country: string; currentSeason: string; onBack: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const [tab, setTab] = useState("Overview");
   const stats = useQuery(() => fetchCompetitionStatistics(id), [id]);
@@ -37,6 +38,8 @@ function CompetitionDetail({ id, name, country, currentSeason, onBack }: {
         actions={
           <>
             <Button variant="secondary" onClick={onBack}>← Back</Button>
+            <Button variant="secondary" onClick={onEdit}>Edit</Button>
+            <Button variant="danger" onClick={onDelete}>Delete</Button>
           </>
         }
       />
@@ -199,20 +202,37 @@ function CompetitionDetail({ id, name, country, currentSeason, onBack }: {
 
 export default function Competitions({ onNavigate }: { onNavigate: (page: string, id?: string) => void }) {
   const [selected, setSelected] = useState<{ id: string; name: string; country: string; currentSeason: string } | null>(null);
+  const [editing, setEditing] = useState<CompetitionView | null | "new">(null);
+  const [deleting, setDeleting] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  const { data: comps, loading, error } = useQuery(fetchCompetitions);
+  const { data: comps, loading, error, refetch } = useQuery(fetchCompetitions);
+
+  const remove = async () => {
+    if (!selected) return;
+    setPending(true);
+    try {
+      await deleteCompetition(selected.id);
+      setDeleting(false);
+      setSelected(null);
+      setMessage("Competition deleted successfully.");
+      refetch();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Delete failed.");
+    } finally { setPending(false); }
+  };
+
+  const saved = () => {
+    setEditing(null);
+    setMessage("Competition saved successfully.");
+    refetch();
+  };
 
   if (selected) {
-    return (
-      <CompetitionDetail
-        id={selected.id}
-        name={selected.name}
-        country={selected.country}
-        currentSeason={selected.currentSeason}
-        onBack={() => setSelected(null)}
-      />
-    );
+    const selectedView = { ...selected, teams: 0, matches: 0, status: "Active" } as CompetitionView;
+    return <><CompetitionDetail id={selected.id} name={selected.name} country={selected.country} currentSeason={selected.currentSeason} onBack={() => setSelected(null)} onEdit={() => setEditing(selectedView)} onDelete={() => setDeleting(true)} />{editing && <CompetitionEditor competition={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}{deleting && <ConfirmDialog title="Delete Competition" message={`Delete ${selected.name}? This cannot be undone.`} onCancel={() => setDeleting(false)} onConfirm={remove} pending={pending} />}{message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}</>;
   }
 
   const filtered = (comps ?? []).filter(c =>
@@ -222,10 +242,11 @@ export default function Competitions({ onNavigate }: { onNavigate: (page: string
 
   return (
     <div className="space-y-5">
+      {message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}
       <PageHeader
         title="Competitions"
         subtitle="Manage and view all competitions"
-        actions={<Button variant="primary">+ New Competition</Button>}
+        actions={<Button variant="primary" onClick={() => setEditing("new")}>+ New Competition</Button>}
       />
       <div className="flex items-center gap-2">
         <Input placeholder="Search competitions…" value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
@@ -264,6 +285,7 @@ export default function Competitions({ onNavigate }: { onNavigate: (page: string
           </Table>
         )}
       </Card>
+      {editing && <CompetitionEditor competition={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}
     </div>
   );
 }

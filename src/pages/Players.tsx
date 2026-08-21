@@ -5,16 +5,17 @@ import {
 } from "recharts";
 import {
   Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Avatar,
-  Input, Select, SectionHeader, Skeleton
+  Input, Select, SectionHeader, Skeleton, ConfirmDialog, Toast
 } from "../components/ui";
 import { useQuery } from "../hooks/useApi";
 import {
   fetchPlayers, fetchPlayer, fetchPlayerStatistics, fetchPlayerMatches, fetchPlayerRatings,
-  fetchTeams,
+  fetchTeams, deletePlayer,
   n, f,
   type PlayerView, type MatchView,
 } from "../services/api";
 import type { GetPlayerDTO, GetTeamDTO, PlayerStatisticsDTO } from "../imports";
+import { PlayerEditor } from "../components/EntityCrudForms";
 
 function radarData(s: typeof import("../imports").PlayerStatisticsDTO | null) {
   if (!s) return [];
@@ -28,7 +29,7 @@ function radarData(s: typeof import("../imports").PlayerStatisticsDTO | null) {
   ];
 }
 
-function PlayerDetail({ playerId, onBack }: { playerId: string; onBack: () => void }) {
+function PlayerDetail({ playerId, onBack, onEdit, onDelete }: { playerId: string; onBack: () => void; onEdit: (player: PlayerView) => void; onDelete: (player: PlayerView) => void }) {
   const [tab, setTab] = useState("Overview");
 
   const playerDto = useQuery(() => fetchPlayer(playerId), [playerId]);
@@ -38,6 +39,7 @@ function PlayerDetail({ playerId, onBack }: { playerId: string; onBack: () => vo
 
   const p = playerDto.data as GetPlayerDTO | null;
   const s = stats.data;
+  const editPlayer = p ? { id: p.id, firstName: p.firstName, lastName: p.lastName, position: p.position, team: p.team?.name ?? "—", teamId: p.team?.id ?? "", national: p.national ?? "", dateOfBirth: p.dateOfBirth ?? "", shirtNumber: n(p.shirtNumber), isActive: p.isActive, isCaptain: p.isCaptain, matches: 0, minutes: 0, goals: 0, assists: 0, rating: 0 } as PlayerView : null;
 
   const age = p?.dateOfBirth
     ? Math.floor((Date.now() - new Date(p.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
@@ -54,9 +56,7 @@ function PlayerDetail({ playerId, onBack }: { playerId: string; onBack: () => vo
         title={p ? `${p.firstName} ${p.lastName}` : "Player"}
         subtitle={p ? `${p.team?.name ?? "—"} · ${p.position}` : ""}
         breadcrumb={["Players", p ? `${p.firstName} ${p.lastName}` : "Player"]}
-        actions={
-          <Button variant="secondary" onClick={onBack}>← Back</Button>
-        }
+        actions={<><Button variant="secondary" onClick={onBack}>← Back</Button>{editPlayer && <Button variant="secondary" onClick={() => onEdit(editPlayer)}>Edit</Button>}{editPlayer && <Button variant="danger" onClick={() => onDelete(editPlayer)}>Delete</Button>}</>}
       />
 
       {/* Player header */}
@@ -201,16 +201,27 @@ function PlayerDetail({ playerId, onBack }: { playerId: string; onBack: () => vo
 
 export default function Players({ selectedId, onNavigate }: { selectedId?: string; onNavigate: (page: string, id?: string) => void }) {
   const [selected, setSelected] = useState<string | null>(selectedId ?? null);
+  const [editing, setEditing] = useState<PlayerView | null | "new">(null);
+  const [deleting, setDeleting] = useState<PlayerView | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [posFilter, setPosFilter] = useState("");
 
-  const { data: players, loading, error } = useQuery(fetchPlayers);
+  const { data: players, loading, error, refetch } = useQuery(fetchPlayers);
   const { data: teams } = useQuery(fetchTeams);
 
-  if (selected) {
-    return <PlayerDetail playerId={selected} onBack={() => setSelected(null)} />;
-  }
+  const saved = () => { setEditing(null); setMessage("Player saved successfully."); refetch(); };
+  const remove = async () => {
+    if (!deleting) return;
+    setPending(true);
+    try { await deletePlayer(deleting.id); setDeleting(null); setSelected(null); setMessage("Player deleted successfully."); refetch(); }
+    catch (err) { setMessage(err instanceof Error ? err.message : "Delete failed."); }
+    finally { setPending(false); }
+  };
+
+  if (selected) return <><PlayerDetail playerId={selected} onBack={() => setSelected(null)} onEdit={setEditing} onDelete={setDeleting} />{editing && <PlayerEditor player={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}{deleting && <ConfirmDialog title="Delete Player" message={`Delete ${deleting.firstName} ${deleting.lastName}? This cannot be undone.`} onCancel={() => setDeleting(null)} onConfirm={remove} pending={pending} />}{message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}</>;
 
   const filtered = (players ?? []).filter((p: PlayerView) => {
     const matchesSearch = `${p.firstName} ${p.lastName}`.toLowerCase().includes(search.toLowerCase());
@@ -221,8 +232,9 @@ export default function Players({ selectedId, onNavigate }: { selectedId?: strin
 
   return (
     <div className="space-y-5">
+      {message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}
       <PageHeader title="Players" subtitle={`${(players ?? []).length} registered players`}
-        actions={<Button variant="primary">+ New Player</Button>}
+        actions={<Button variant="primary" onClick={() => setEditing("new")}>+ New Player</Button>}
       />
       <div className="flex items-center gap-2 flex-wrap">
         <Input placeholder="Search players…" value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
@@ -267,6 +279,7 @@ export default function Players({ selectedId, onNavigate }: { selectedId?: strin
           </Table>
         )}
       </Card>
+      {editing && <PlayerEditor player={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}
     </div>
   );
 }

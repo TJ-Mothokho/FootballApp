@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, Button, Select, FormSection, StatInput, Textarea, Toast, PageHeader, Input } from "../components/ui";
 import { useQuery } from "../hooks/useApi";
-import { fetchMatches, fetchTeams, createTeamMatchStats, n } from "../services/api";
+import { fetchMatches, fetchTeamMatchStats, createTeamMatchStats, updateTeamMatchStats, deleteTeamMatchStats, n } from "../services/api";
 import type { MatchView } from "../services/api";
-import type { GetTeamDTO } from "../imports";
+import type { GetTeamMatchStatsDTO } from "../imports";
 
 const defaultStats = {
   formation: "4-2-3-1", playingStyle: "Possession",
@@ -22,9 +22,11 @@ const defaultStats = {
 const p = (s: string) => s ? parseFloat(s) : undefined;
 const i = (s: string) => s ? parseInt(s, 10) : undefined;
 
-export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: string) => void }) {
+export default function TeamMatchStats({ onNavigate, initialMatchId }: { onNavigate: (page: string, id?: string) => void; initialMatchId?: string }) {
   const [stats, setStats] = useState(defaultStats);
-  const [matchId, setMatchId] = useState("");
+  const [matchId, setMatchId] = useState(initialMatchId ?? "");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState("");
   const [isHome, setIsHome] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -32,7 +34,7 @@ export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: stri
   const [saving, setSaving] = useState(false);
 
   const { data: matches, loading: matchesLoading } = useQuery(fetchMatches);
-  const { data: teams, loading: teamsLoading } = useQuery(fetchTeams);
+  const entries = useQuery(fetchTeamMatchStats);
 
   const s = (field: keyof typeof stats) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -46,7 +48,7 @@ export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: stri
     }
     setSaving(true);
     try {
-      await createTeamMatchStats({
+      const payload = {
         matchId,
         teamId,
         isHome,
@@ -119,10 +121,21 @@ export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: stri
           tacticalNotes: stats.tacticalNotes || undefined,
           analystNotes: stats.analystNotes || undefined,
         } : null,
-      });
+      };
+      if (editingId) {
+        await updateTeamMatchStats(editingId, {
+          isHome: payload.isHome, formation: payload.formation, playingStyle: payload.playingStyle,
+          matchStats: payload.matchStats, matchShots: payload.matchShots, matchExpectedGoals: payload.matchExpectedGoals,
+          matchPasses: payload.matchPasses, matchDiscipline: payload.matchDiscipline, matchDefence: payload.matchDefence,
+          matchDuels: payload.matchDuels, matchAttackingZones: payload.matchAttackingZones, matchAnalysis: payload.matchAnalysis,
+        });
+      } else {
+        await createTeamMatchStats(payload);
+      }
+      entries.refetch();
       setToastType("success");
-      setToast(next ? "Saved — reset for next team" : "Team match stats saved successfully");
-      if (next) { setStats(defaultStats); setTeamId(""); }
+      setToast(editingId ? "Team match stats updated successfully" : next ? "Saved — reset for next team" : "Team match stats saved successfully");
+      if (next || editingId) { setStats(defaultStats); setTeamId(""); setEditingId(null); }
     } catch (err) {
       setToastType("error");
       const msg = err instanceof Error ? err.message : "Save failed";
@@ -133,6 +146,80 @@ export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: stri
   };
 
   const selectedMatch = (matches ?? []).find((m: MatchView) => m.id === matchId);
+  const matchTeams = selectedMatch ? [
+    { id: selectedMatch.homeTeamId, name: selectedMatch.homeTeam, isHome: true },
+    { id: selectedMatch.awayTeamId, name: selectedMatch.awayTeam, isHome: false },
+  ].filter(team => team.id) : [];
+  const currentEntries = (entries.data ?? []).filter((entry: GetTeamMatchStatsDTO) => entry.match?.id === matchId);
+
+  useEffect(() => {
+    if (initialMatchId) setMatchId(initialMatchId);
+  }, [initialMatchId]);
+
+  useEffect(() => {
+    if (!selectedMatch || editingId) return;
+    const selectedTeam = matchTeams.find(team => team.id === teamId);
+    if (!selectedTeam) {
+      setTeamId(selectedMatch.homeTeamId);
+      setIsHome(true);
+    }
+  }, [selectedMatch, teamId, editingId]);
+
+  const chooseMatch = (id: string) => {
+    setMatchId(id);
+    setTeamId("");
+    setEditingId(null);
+  };
+
+  const chooseTeam = (id: string) => {
+    setTeamId(id);
+    const matchTeam = matchTeams.find(team => team.id === id);
+    if (matchTeam) setIsHome(matchTeam.isHome);
+  };
+
+  const editEntry = (entry: GetTeamMatchStatsDTO) => {
+    setEditingId(entry.id);
+    setMatchId(entry.match.id);
+    setTeamId(entry.team.id);
+    setIsHome(entry.isHome);
+    const statsValue = entry.matchStats ?? {};
+    const shots = entry.matchShots ?? {};
+    const expected = entry.matchExpectedGoals ?? {};
+    const passes = entry.matchPasses ?? {};
+    const defence = entry.matchDefence ?? {};
+    const duels = entry.matchDuels ?? {};
+    const discipline = entry.matchDiscipline ?? {};
+    const zones = entry.matchAttackingZones ?? {};
+    setStats({
+      formation: entry.formation ?? "", playingStyle: entry.playingStyle ?? "",
+      goals: String(n(statsValue.teamGoals)), shotsOnTarget: String(n(shots.shotsOnTarget)), shotsOffTarget: String(n(shots.shotsOffTarget)), blockedShots: String(n(shots.blockedShots)), hitWoodwork: String(n(shots.hitWoodwork)), totalShots: String(n(shots.totalShots)),
+      xG: String(n(expected.xg)), bigChancesCreated: String(n(statsValue.bigChances)), bigChancesMissed: String(n(statsValue.bigChancesMissed)), corners: String(n(statsValue.corners)),
+      possession: String(n(statsValue.possession)), touchesInOppBox: String(n(passes.touchesInOppositionBox)), successfulDribbles: String(n(duels.successfulDribbles)), dribblesAttempted: "",
+      passesCompleted: String(n(passes.accuratePasses)), passesAttempted: String(n(passes.passes)), longBallsCompleted: String(n(passes.accurateLongBalls)), crossesCompleted: String(n(passes.accurateCrosses)),
+      tackles: String(n(defence.tackles)), interceptions: String(n(defence.interceptions)), blocks: String(n(defence.blocks)), clearances: String(n(defence.clearances)), keeperSaves: String(n(defence.keeperSaves)),
+      foulsCommitted: String(n(discipline.foulsCommitted)), yellowCards: String(n(discipline.yellowCards)), redCards: String(n(discipline.redCards)),
+      duelsWon: String(n(duels.duelsWon)), groundDuelsWon: String(n(duels.groundDuelsWon)), aerialDuelsWon: String(n(duels.aerialDuelsWon)),
+      centerAttack: String(n(zones.centerAttack)), leftAttack: String(n(zones.leftAttack)), rightAttack: String(n(zones.rightAttack)), xgot: String(n(expected.xgot)),
+      tacticalNotes: entry.matchAnalysis?.tacticalNotes ?? "", analystNotes: entry.matchAnalysis?.analystNotes ?? "",
+    });
+  };
+
+  const removeEntry = async (id: string) => {
+    setSaving(true);
+    try {
+      await deleteTeamMatchStats(id);
+      setToastType("success");
+      setToast("Team match stats deleted successfully");
+      if (editingId === id) { setEditingId(null); setStats(defaultStats); }
+      entries.refetch();
+    } catch (error) {
+      setToastType("error");
+      setToast(error instanceof Error ? error.message : "Delete failed");
+    } finally {
+      setSaving(false);
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -147,20 +234,17 @@ export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: stri
       {/* Context selector */}
       <Card className="p-4 mb-5">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Select label="Match" value={matchId} onChange={e => setMatchId(e.target.value)} disabled={matchesLoading}>
+          <Select label="Match" value={matchId} onChange={e => chooseMatch(e.target.value)} disabled={matchesLoading}>
             <option value="">— Select Match —</option>
             {(matches ?? []).map((m: MatchView) => (
               <option key={m.id} value={m.id}>{m.homeTeam} vs {m.awayTeam} ({m.date})</option>
             ))}
           </Select>
-          <Select label="Team" value={teamId} onChange={e => setTeamId(e.target.value)} disabled={teamsLoading}>
-            <option value="">— Select Team —</option>
-            {(teams ?? []).map((t: GetTeamDTO) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          <Select label="Team" value={teamId} onChange={e => chooseTeam(e.target.value)} disabled={!selectedMatch}>
+            <option value="">— Select a Match First —</option>
+            {matchTeams.map(team => <option key={team.id} value={team.id}>{team.name} ({team.isHome ? "Home" : "Away"})</option>)}
           </Select>
-          <Select label="Home / Away" value={isHome ? "home" : "away"} onChange={e => setIsHome(e.target.value === "home")}>
-            <option value="home">Home</option>
-            <option value="away">Away</option>
-          </Select>
+          <Input label="Home / Away" value={isHome ? "Home" : "Away"} readOnly />
         </div>
         {selectedMatch && (
           <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
@@ -171,6 +255,14 @@ export default function TeamMatchStats({ onNavigate }: { onNavigate: (page: stri
           </div>
         )}
       </Card>
+
+      {selectedMatch && !entries.loading && currentEntries.length > 0 && (
+        <Card className="p-4 mb-5">
+          <div className="flex items-center justify-between gap-3 mb-3"><div><p className="text-sm font-semibold text-foreground">Existing Team Entries</p><p className="text-xs text-muted-foreground">Edit or remove an existing home or away record before entering a replacement.</p></div></div>
+          <div className="flex flex-wrap gap-2">{currentEntries.map((entry: GetTeamMatchStatsDTO) => <div key={entry.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"><span className="font-medium text-foreground">{entry.team.name}</span><span className="text-xs text-muted-foreground">{entry.isHome ? "Home" : "Away"} · {entry.formation}</span><Button variant="ghost" className="text-xs" onClick={() => editEntry(entry)}>Edit</Button><Button variant="danger" className="text-xs" onClick={() => setDeletingId(entry.id)}>Delete</Button></div>)}</div>
+        </Card>
+      )}
+      {deletingId && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 p-4"><Card className="w-full max-w-sm p-5 shadow-xl"><h2 className="font-semibold text-foreground">Delete team stats?</h2><p className="mt-2 text-sm text-muted-foreground">This team match statistics record will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setDeletingId(null)} disabled={saving}>Cancel</Button><Button variant="danger" onClick={() => removeEntry(deletingId)} disabled={saving}>{saving ? "Deleting…" : "Delete"}</Button></div></Card></div>}
 
       <div className="space-y-4 pb-24">
         <FormSection title="General">

@@ -1,17 +1,18 @@
 import { useState } from "react";
-import { Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Input, Skeleton } from "../components/ui";
+import { Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Input, Skeleton, ConfirmDialog, Toast } from "../components/ui";
 import { FormBadge, Avatar } from "../components/ui";
 import { useQuery } from "../hooks/useApi";
 import {
   fetchSeasons,
   fetchSeasonStatistics,
-  fetchSeasonMatches,
+  fetchSeasonMatches, deleteSeason,
   n, f,
   type SeasonView,
   type MatchView,
 } from "../services/api";
+import { SeasonEditor } from "../components/EntityCrudForms";
 
-function SeasonDetail({ season, onBack }: { season: SeasonView; onBack: () => void }) {
+function SeasonDetail({ season, onBack, onEdit, onDelete }: { season: SeasonView; onBack: () => void; onEdit: () => void; onDelete: () => void }) {
   const [tab, setTab] = useState("Overview");
   const stats = useQuery(() => fetchSeasonStatistics(season.id), [season.id]);
   const seasonMatches = useQuery(() => fetchSeasonMatches(season.id), [season.id]);
@@ -27,6 +28,8 @@ function SeasonDetail({ season, onBack }: { season: SeasonView; onBack: () => vo
         actions={
           <>
             <Button variant="secondary" onClick={onBack}>← Back</Button>
+            <Button variant="secondary" onClick={onEdit}>Edit</Button>
+            <Button variant="danger" onClick={onDelete}>Delete</Button>
           </>
         }
       />
@@ -100,13 +103,24 @@ function SeasonDetail({ season, onBack }: { season: SeasonView; onBack: () => vo
 
 export default function Seasons({ onNavigate }: { onNavigate: (page: string, id?: string) => void }) {
   const [selected, setSelected] = useState<SeasonView | null>(null);
+  const [editing, setEditing] = useState<SeasonView | null | "new">(null);
+  const [deleting, setDeleting] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  const { data: seasons, loading, error } = useQuery(fetchSeasons);
+  const { data: seasons, loading, error, refetch } = useQuery(fetchSeasons);
 
-  if (selected) {
-    return <SeasonDetail season={selected} onBack={() => setSelected(null)} />;
-  }
+  const saved = () => { setEditing(null); setMessage("Season saved successfully."); refetch(); };
+  const remove = async () => {
+    if (!selected) return;
+    setPending(true);
+    try { await deleteSeason(selected.id); setDeleting(false); setSelected(null); setMessage("Season deleted successfully."); refetch(); }
+    catch (err) { setMessage(err instanceof Error ? err.message : "Delete failed."); }
+    finally { setPending(false); }
+  };
+
+  if (selected) return <><SeasonDetail season={selected} onBack={() => setSelected(null)} onEdit={() => setEditing(selected)} onDelete={() => setDeleting(true)} />{editing && <SeasonEditor season={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}{deleting && <ConfirmDialog title="Delete Season" message={`Delete ${selected.name}? This cannot be undone.`} onCancel={() => setDeleting(false)} onConfirm={remove} pending={pending} />}{message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}</>;
 
   const filtered = (seasons ?? []).filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -115,8 +129,9 @@ export default function Seasons({ onNavigate }: { onNavigate: (page: string, id?
 
   return (
     <div className="space-y-5">
+      {message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}
       <PageHeader title="Seasons" subtitle="Manage competition seasons"
-        actions={<Button variant="primary">+ New Season</Button>}
+        actions={<Button variant="primary" onClick={() => setEditing("new")}>+ New Season</Button>}
       />
       <div className="flex items-center gap-2">
         <Input placeholder="Search seasons…" value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
@@ -151,6 +166,7 @@ export default function Seasons({ onNavigate }: { onNavigate: (page: string, id?
           </Table>
         )}
       </Card>
+      {editing && <SeasonEditor season={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}
     </div>
   );
 }

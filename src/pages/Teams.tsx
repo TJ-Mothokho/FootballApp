@@ -3,18 +3,19 @@ import {
   LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 import {
-  Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Avatar, Input, SectionHeader, Skeleton
+  Card, Badge, Button, Table, Th, Td, Tr, Tabs, PageHeader, StatCard, Avatar, Input, SectionHeader, Skeleton, ConfirmDialog, Toast
 } from "../components/ui";
 import { useQuery } from "../hooks/useApi";
 import {
   fetchTeams, fetchTeam, fetchTeamStatistics, fetchTeamPlayers, fetchTeamMatches,
-  fetchTeamTopScorers, fetchTeamTopAssists, fetchTeamMostMinutes, fetchTeamMostPasses,
+  fetchTeamTopScorers, fetchTeamTopAssists, fetchTeamMostMinutes, fetchTeamMostPasses, deleteTeam,
   n, f,
   type PlayerView, type MatchView, type TopPerformerView,
 } from "../services/api";
 import type { GetTeamDTO } from "../imports";
+import { TeamEditor } from "../components/EntityCrudForms";
 
-function TeamDetail({ teamId, onBack, onNavigate }: { teamId: string; onBack: () => void; onNavigate: (page: string, id?: string) => void }) {
+function TeamDetail({ teamId, onBack, onNavigate, onEdit, onDelete }: { teamId: string; onBack: () => void; onNavigate: (page: string, id?: string) => void; onEdit: (team: GetTeamDTO) => void; onDelete: (team: GetTeamDTO) => void }) {
   const [tab, setTab] = useState("Overview");
 
   const team = useQuery(() => fetchTeam(teamId), [teamId]);
@@ -35,9 +36,7 @@ function TeamDetail({ teamId, onBack, onNavigate }: { teamId: string; onBack: ()
         title={t?.name ?? "Team"}
         subtitle={t ? `${t.city ?? ""} · ${t.preferredFormation ?? ""}` : ""}
         breadcrumb={["Teams", t?.name ?? "Team"]}
-        actions={
-          <Button variant="secondary" onClick={onBack}>← Back</Button>
-        }
+        actions={<><Button variant="secondary" onClick={onBack}>← Back</Button>{t && <Button variant="secondary" onClick={() => onEdit(t)}>Edit</Button>}{t && <Button variant="danger" onClick={() => onDelete(t)}>Delete</Button>}</>}
       />
 
       {/* Team header card */}
@@ -217,12 +216,23 @@ function TeamDetail({ teamId, onBack, onNavigate }: { teamId: string; onBack: ()
 
 export default function Teams({ onNavigate }: { onNavigate: (page: string, id?: string) => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<GetTeamDTO | null | "new">(null);
+  const [deleting, setDeleting] = useState<GetTeamDTO | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const { data: teams, loading, error } = useQuery(fetchTeams);
+  const { data: teams, loading, error, refetch } = useQuery(fetchTeams);
 
-  if (selectedId) {
-    return <TeamDetail teamId={selectedId} onBack={() => setSelectedId(null)} onNavigate={onNavigate} />;
-  }
+  const saved = () => { setEditing(null); setMessage("Team saved successfully."); refetch(); };
+  const remove = async () => {
+    if (!deleting) return;
+    setPending(true);
+    try { await deleteTeam(deleting.id); setDeleting(null); setSelectedId(null); setMessage("Team deleted successfully."); refetch(); }
+    catch (err) { setMessage(err instanceof Error ? err.message : "Delete failed."); }
+    finally { setPending(false); }
+  };
+
+  if (selectedId) return <><TeamDetail teamId={selectedId} onBack={() => setSelectedId(null)} onNavigate={onNavigate} onEdit={setEditing} onDelete={setDeleting} />{editing && <TeamEditor team={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}{deleting && <ConfirmDialog title="Delete Team" message={`Delete ${deleting.name}? This cannot be undone.`} onCancel={() => setDeleting(null)} onConfirm={remove} pending={pending} />}{message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}</>;
 
   const filtered = (teams ?? []).filter((t: GetTeamDTO) =>
     t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -232,8 +242,9 @@ export default function Teams({ onNavigate }: { onNavigate: (page: string, id?: 
 
   return (
     <div className="space-y-5">
+      {message && <Toast message={message} type={message.includes("success") ? "success" : "error"} onClose={() => setMessage(null)} />}
       <PageHeader title="Teams" subtitle={`${(teams ?? []).length} teams`}
-        actions={<Button variant="primary">+ New Team</Button>}
+        actions={<Button variant="primary" onClick={() => setEditing("new")}>+ New Team</Button>}
       />
       <div className="flex items-center gap-2">
         <Input placeholder="Search teams…" value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
@@ -270,6 +281,7 @@ export default function Teams({ onNavigate }: { onNavigate: (page: string, id?: 
           </Table>
         )}
       </Card>
+      {editing && <TeamEditor team={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={saved} />}
     </div>
   );
 }
